@@ -13,7 +13,11 @@ def login(page):
 
 def start_server():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+    browser = p.chromium.launch(
+    headless=True,
+    args=["--no-sandbox", "--disable-dev-shm-usage"]
+)
+
         page = browser.new_page()
         login(page)
 
@@ -26,7 +30,11 @@ def start_server():
 
 def stop_server():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+browser = p.chromium.launch(
+    headless=True,
+    args=["--no-sandbox", "--disable-dev-shm-usage"]
+)
+
         page = browser.new_page()
         login(page)
 
