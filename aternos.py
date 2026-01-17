@@ -1,46 +1,99 @@
+import discord
+from discord.ext import commands, tasks
+from playwright.async_api import async_playwright
+import asyncio
 import os
-from playwright.sync_api import sync_playwright
 
-EMAIL = os.getenv("ATERNOS_EMAIL")
-PASSWORD = os.getenv("ATERNOS_PASSWORD")
+# ---------------- Bot Setup ----------------
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-def login(page):
-    page.goto("https://aternos.org/go/")
-    page.fill("input[name='user']", EMAIL)
-    page.fill("input[name='password']", PASSWORD)
-    page.click("button.login-button")
-    page.wait_for_timeout(5000)
+# ---------------- Environment Variables ----------------
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+ATERNOS_EMAIL = os.getenv("ATERNOS_EMAIL")
+ATERNOS_PASSWORD = os.getenv("ATERNOS_PASSWORD")
 
-def start_server():
-    with sync_playwright() as p:
-    browser = p.chromium.launch(
-    headless=True,
-    args=["--no-sandbox", "--disable-dev-shm-usage"]
-)
+# Track server state
+server_running = False
 
-        page = browser.new_page()
-        login(page)
+# ---------------- Helper Functions ----------------
+async def login_aternos():
+    """
+    Returns a Playwright page logged into Aternos
+    """
+    playwright = await async_playwright().start()
+    browser = await playwright.chromium.launch(headless=True)
+    context = await browser.new_context()
+    page = await context.new_page()
+    
+    # Go to Aternos login page
+    await page.goto("https://aternos.org/go/")
+    
+    # Fill login form
+    await page.fill('input[name="username"]', ATERNOS_EMAIL)
+    await page.fill('input[name="password"]', ATERNOS_PASSWORD)
+    await page.click('button[type="submit"]')
+    
+    # Wait for server page to load
+    await page.wait_for_url("https://aternos.org/server/*", timeout=15000)
+    
+    return playwright, browser, context, page
 
-        page.goto("https://aternos.org/server/")
-        page.wait_for_timeout(5000)
-        page.click("#start")
+async def start_server():
+    global server_running
+    playwright, browser, context, page = await login_aternos()
+    
+    try:
+        await page.click('button:has-text("Start")')
+        server_running = True
+        return playwright, browser, context, page, True
+    except:
+        await browser.close()
+        return playwright, browser, context, page, False
 
-        browser.close()
-        return "✅ Server starting!"
+async def stop_server(page, browser):
+    global server_running
+    try:
+        await page.click('button:has-text("Stop")')
+        server_running = False
+        await browser.close()
+        return True
+    except:
+        await browser.close()
+        return False
 
-def stop_server():
-    with sync_playwright() as p:
-browser = p.chromium.launch(
-    headless=True,
-    args=["--no-sandbox", "--disable-dev-shm-usage"]
-)
+# ---------------- Commands ----------------
+@bot.command()
+async def ping(ctx):
+    await ctx.send("🏓 Pong!")
 
-        page = browser.new_page()
-        login(page)
+@bot.command()
+async def start(ctx):
+    global server_running
+    if server_running:
+        await ctx.send("⚠️ Server is already running!")
+        return
+    await ctx.send("🚀 Starting server...")
+    
+    result = await start_server()
+    playwright, browser, context, page, success = result
+    
+    if success:
+        await ctx.send("✅ Server started! Auto-stopping in 2 minutes.")
+        # Auto-stop after 2 minutes
+        await asyncio.sleep(120)
+        stopped = await stop_server(page, browser)
+        if stopped:
+            await ctx.send("⏹️ Server stopped automatically.")
+        else:
+            await ctx.send("❌ Failed to stop server.")
+    else:
+        await ctx.send("❌ Failed to start server.")
 
-        page.goto("https://aternos.org/server/")
-        page.wait_for_timeout(5000)
-        page.click("#stop")
+@bot.command()
+async def stop(ctx):
+    await ctx.send("⚠️ Manual stop requires the page object, use !start first.")
 
-        browser.close()
-        return "🛑 Server stopped!"
+# ---------------- Run Bot ----------------
+bot.run(DISCORD_TOKEN)
